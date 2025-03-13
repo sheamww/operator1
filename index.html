@@ -1,75 +1,302 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Operator1 Showcase</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f4f4f4;
-        }
-        header {
-            background-color: #333;
-            color: #fff;
-            padding: 10px 20px;
-            text-align: center;
-        }
-        nav ul {
-            list-style-type: none;
-            padding: 0;
-        }
-        nav ul li {
-            display: inline;
-            margin-right: 10px;
-        }
-        nav ul li a {
-            color: #fff;
-            text-decoration: none;
-        }
-        main {
-            padding: 20px;
-        }
-        button {
-            padding: 10px 15px;
-            background-color: #333;
-            color: #fff;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #555;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <title>PS2/Xbox-Inspired Sub-LLM Demo</title>
+  <style>
+    html, body {
+      margin: 0; 
+      padding: 0; 
+      height: 100%;
+      overflow: hidden; 
+      background: #000;
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    /* Container for Three.js Canvas */
+    #scene-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;  /* behind everything else */
+      background: radial-gradient(circle at center, #070b34, #000 80%);
+    }
+
+    /* Chat UI container */
+    .chat-wrapper {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10; /* above Three.js canvas */
+      display: flex;
+      flex-direction: column;
+      width: 90%;
+      max-width: 600px;
+    }
+
+    /* Chat bubble for LLM output */
+    .chat-log {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(8px);
+      max-height: 300px;
+      overflow-y: auto;
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 10px;
+      color: #fff;
+      font-size: 14px;
+    }
+
+    /* Input row for user prompt */
+    .chat-input-row {
+      display: flex;
+      align-items: center;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      padding: 10px;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-radius: 5px;
+      background: rgba(0, 0, 0, 0.3);
+      color: #fff;
+      outline: none;
+      font-size: 14px;
+      margin-right: 10px;
+    }
+
+    input[type="text"]::placeholder {
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    button {
+      background: linear-gradient(135deg, #0ed2f7 0%, #047edf 100%);
+      border: none;
+      border-radius: 5px;
+      padding: 10px 15px;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+      transition: transform 0.1s ease-in-out;
+    }
+
+    button:hover {
+      transform: scale(1.05);
+    }
+
+    .chat-message {
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+
+    .user-message {
+      color: #0ed2f7;
+    }
+
+    .ai-message {
+      color: #fff;
+    }
+  </style>
 </head>
 <body>
-    <header>
-        <h1>Operator1 Showcase</h1>
-        <nav>
-            <ul>
-                <li><a href="#">Home</a></li>
-                <li><a href="#">About</a></li>
-                <li><a href="#">Contact</a></li>
-            </ul>
-        </nav>
-    </header>
-    <main>
-        <h2>Welcome to the Operator1 Showcase</h2>
-        <p>Explore the capabilities of Operator1 through this interactive page.</p>
-        <button onclick="showMessage()">Click Me!</button>
-        <p id="message" style="display:none; margin-top: 20px;">Hello, GitHub Pages!</p>
-    </main>
-    <script>
-        function showMessage() {
-            var message = document.getElementById('message');
-            if (message.style.display === 'none') {
-                message.style.display = 'block';
-            } else {
-                message.style.display = 'none';
-            }
+  <!-- The 3D Scene Container -->
+  <div id="scene-container"></div>
+
+  <!-- Simple Chat Overlay -->
+  <div class="chat-wrapper">
+    <div class="chat-log" id="chatLog"></div>
+    <div class="chat-input-row">
+      <input 
+        id="userInput" 
+        type="text" 
+        placeholder="Ask the Sub-LLM anything..."
+        onkeydown="if (event.key === 'Enter') { sendMessage(); }"
+      />
+      <button onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+  <!-- Three.js (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+
+  <script>
+    // =============================
+    // 1) Three.js Scene Setup
+    // =============================
+
+    let scene, camera, renderer;
+    let particleSystem, uniforms, clock;
+
+    const container = document.getElementById('scene-container');
+
+    // Initialize scene and camera
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(
+      75, 
+      window.innerWidth / window.innerHeight, 
+      0.1, 
+      1000
+    );
+    camera.position.z = 50;
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    container.appendChild(renderer.domElement);
+
+    // Handle window resize
+    window.addEventListener('resize', onWindowResize, false);
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // Create a custom geometry for a "tunnel-like" swirl
+    const particleCount = 20000;
+    const positions = new Float32Array(particleCount * 3);
+    const speeds = new Float32Array(particleCount);
+
+    // Populate random swirl coordinates
+    for (let i = 0; i < particleCount; i++) {
+      let r = Math.random() * 5 + 10;           // radial distance
+      let angle = Math.random() * Math.PI * 4;    // swirl angle
+      let y = (Math.random() - 0.5) * 80;         // vertical spread
+
+      positions[i * 3 + 0] = r * Math.cos(angle);
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = r * Math.sin(angle);
+
+      speeds[i] = (Math.random() * 0.5) + 0.5;    // swirling speed factor
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('aSpeed', new THREE.BufferAttribute(speeds, 1));
+
+    // Shaders for swirl movement + color
+    uniforms = {
+      uTime: { value: 0 },
+      uColor1: { value: new THREE.Color('#0ed2f7') },
+      uColor2: { value: new THREE.Color('#ffffff') }
+    };
+
+    const vertexShader = `
+      uniform float uTime;
+      attribute float aSpeed;
+      varying float vFade;
+
+      void main() {
+        // Position
+        vec3 pos = position;
+        // Make the swirl revolve over time
+        float swirlAngle = uTime * 0.2 * aSpeed;
+        
+        // Rotating around the Y-axis (like a spinning galaxy)
+        float cosA = cos(swirlAngle);
+        float sinA = sin(swirlAngle);
+        vec3 rotatedPosition;
+        rotatedPosition.x = cosA * pos.x - sinA * pos.z;
+        rotatedPosition.y = pos.y;
+        rotatedPosition.z = sinA * pos.x + cosA * pos.z;
+
+        // Fade factor based on distance from center
+        vFade = 1.0 - clamp(length(pos) / 60.0, 0.0, 1.0);
+
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(rotatedPosition, 1.0);
+        gl_PointSize = 2.0;
+      }
+    `;
+
+    const fragmentShader = `
+      uniform vec3 uColor1;
+      uniform vec3 uColor2;
+      varying float vFade;
+
+      void main() {
+        // Interpolate between two colors based on vFade
+        vec3 color = mix(uColor2, uColor1, vFade);
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `;
+
+    const material = new THREE.ShaderMaterial({
+      uniforms: uniforms,
+      vertexShader: vertexShader,
+      fragmentShader: fragmentShader,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false
+    });
+
+    particleSystem = new THREE.Points(geometry, material);
+    scene.add(particleSystem);
+
+    clock = new THREE.Clock();
+
+    // Animation loop
+    function animate() {
+      requestAnimationFrame(animate);
+      uniforms.uTime.value = clock.getElapsedTime();
+      
+      // Subtle camera movement to emulate menu "drift"
+      camera.position.x = Math.sin(clock.getElapsedTime() * 0.2) * 5;
+      camera.position.y = Math.cos(clock.getElapsedTime() * 0.1) * 3;
+      camera.lookAt(scene.position);
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // =============================
+    // 2) Simple Sub-LLM Chat Logic
+    // =============================
+
+    const chatLogEl = document.getElementById('chatLog');
+    const userInputEl = document.getElementById('userInput');
+
+    // Function to display chat messages
+    function addChatMessage(message, isUser) {
+      const msgEl = document.createElement('div');
+      msgEl.classList.add('chat-message');
+      msgEl.classList.add(isUser ? 'user-message' : 'ai-message');
+      msgEl.textContent = (isUser ? 'You: ' : 'Sub-LLM: ') + message;
+      chatLogEl.appendChild(msgEl);
+      chatLogEl.scrollTop = chatLogEl.scrollHeight; // auto-scroll
+    }
+
+    // Send user message to Sub-LLM (placeholder)
+    async function sendMessage() {
+      const text = userInputEl.value.trim();
+      if (!text) return;
+
+      // Display user message
+      addChatMessage(text, true);
+      userInputEl.value = '';
+
+      try {
+        // In a real-world usage, replace this with your actual LLM endpoint
+        const response = await fetch('/api/your-llm-endpoint', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ prompt: text })
+        });
+
+        if (!response.ok) {
+          throw new Error(`LLM API error: ${response.status}`);
         }
-    </script>
+
+        const data = await response.json();
+        // Assume your LLM response is in data.answer
+        const llmReply = data.answer || "I'm not sure how to respond.";
+        addChatMessage(llmReply, false);
+
+      } catch (error) {
+        addChatMessage("Error: " + error.message, false);
+      }
+    }
+  </script>
 </body>
 </html>

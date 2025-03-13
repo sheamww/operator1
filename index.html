@@ -28,70 +28,59 @@
 <body>
   <!-- Three.js Scene Container -->
   <div id="scene-container"></div>
-
   <!-- Three.js (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
-
   <script>
     // =============================
     // 1) Scene & Camera Setup
     // =============================
     let scene, camera, renderer, clock, particleSystem, uniforms;
     const container = document.getElementById('scene-container');
-
     scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(
-      75,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      1000
-    );
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.z = 50;
-
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(renderer.domElement);
-
+    
     // =============================
     // 2) Particle Swirl & Cascading Geometry
     // =============================
-    // We'll use a "base angle" attribute so that all particles twirl together.
     const particleCount = 20000;
     const positions = new Float32Array(particleCount * 3);
-    const baseAngles = new Float32Array(particleCount); // store initial angle per particle
-
-    // Define a vertical fall range (for example, -40 to +40)
+    const speeds = new Float32Array(particleCount);
+    // Define a vertical fall range (from -40 to +40)
     const fallRange = 80;
     const fallHalf = fallRange * 0.5;
     for (let i = 0; i < particleCount; i++) {
       const r = Math.random() * 5 + 10;          // radial distance between 10 and 15
-      const angle = Math.random() * Math.PI * 4;   // initial angle for twirl
-      const y = (Math.random() - 0.5) * fallRange; // y position within range
+      const angle = Math.random() * Math.PI * 4;   // swirl angle
+      // y position is randomly within the vertical range
+      const y = (Math.random() - 0.5) * fallRange;
       positions[i * 3]     = r * Math.cos(angle);
       positions[i * 3 + 1] = y;
       positions[i * 3 + 2] = r * Math.sin(angle);
-      baseAngles[i] = angle; // store the initial angle
+      // Use individual speed only for the swirl (rotation)
+      speeds[i] = (Math.random() * 0.5) + 0.5;
     }
-
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('aBaseAngle', new THREE.BufferAttribute(baseAngles, 1));
-
+    geometry.setAttribute('aSpeed', new THREE.BufferAttribute(speeds, 1));
+    
     // =============================
     // 3) Shaders (Twirling, Cascading & Screen-Space Avoidance)
     // =============================
-    // Uniforms include time, color, mouse (in NDC), and conversion factors.
     uniforms = {
       uTime:         { value: 0 },
       uColor1:       { value: new THREE.Color('#0ed2f7') },
       uColor2:       { value: new THREE.Color('#ffffff') },
       uMouseNDC:     { value: new THREE.Vector2(0, 0) },
-      uThresholdNDC: { value: 0.2 },      // screen-space threshold for avoidance
-      uPushStrength: { value: 1.0 },      // avoidance push strength (reduced by 50%)
+      uThresholdNDC: { value: 0.2 },
+      uPushStrength: { value: 1.0 },
       uTanHalfFov:   { value: Math.tan(camera.fov * 0.5 * Math.PI/180) },
       uAspect:       { value: window.innerWidth / window.innerHeight }
     };
-
+    
     const vertexShader = `
       uniform float uTime;
       uniform vec2 uMouseNDC;
@@ -99,63 +88,63 @@
       uniform float uPushStrength;
       uniform float uTanHalfFov;
       uniform float uAspect;
-      attribute float aBaseAngle;
+      attribute float aSpeed;
       varying float vFade;
       
       void main() {
-        vec3 pos = position;
-        // Unified twirling: all particles rotate together.
-        float twirlSpeed = 0.5; // unified twirl speed
-        float swirlAngle = aBaseAngle + uTime * twirlSpeed;
-        float cosA = cos(swirlAngle);
-        float sinA = sin(swirlAngle);
-        vec3 rotatedPosition;
-        // Use a fixed radius (with slight variation) for a consistent pillar
-        rotatedPosition.x = cosA * (10.0 + 5.0 * sin(aBaseAngle));
-        rotatedPosition.z = sinA * (10.0 + 5.0 * sin(aBaseAngle));
-        
-        // Cascading: uniformly fall from top to bottom at a fixed rate.
-        float fallSpeed = 0.2; // unified fall speed (half the twirl speed)
-        rotatedPosition.y = mod((pos.y - uTime * fallSpeed) + ${fallHalf}.0, ${fallRange}.0) - ${fallHalf}.0;
-        
-        // Fade factor based on original distance (for color blending)
-        vFade = 1.0 - clamp(length(pos) / 60.0, 0.0, 1.0);
-        
-        // Transform the rotated (and cascaded) position to view space
-        vec4 viewPos = modelViewMatrix * vec4(rotatedPosition, 1.0);
-        // Project to clip space then to normalized device coordinates (NDC)
-        vec4 clipPos = projectionMatrix * viewPos;
-        vec2 ndcPos = clipPos.xy / clipPos.w;
-        
-        // Screen-space avoidance: push particles away if the mouse is close.
-        vec2 deltaNDC = ndcPos - uMouseNDC;
-        float d = length(deltaNDC);
-        if(d < uThresholdNDC) {
-          float avoidanceFactor = 1.0 - (d / uThresholdNDC);
-          vec2 pushNDC = normalize(deltaNDC) * avoidanceFactor * uPushStrength;
-          // Convert NDC displacement to a view-space offset:
-          vec2 pushView;
-          pushView.x = pushNDC.x * viewPos.z * uTanHalfFov * uAspect;
-          pushView.y = pushNDC.y * viewPos.z * uTanHalfFov;
-          viewPos.xy += pushView;
-        }
-        
-        gl_Position = projectionMatrix * viewPos;
-        gl_PointSize = 2.0;
+          vec3 pos = position;
+          
+          // --- 1) Rotate around X-axis (swirl in Y–Z plane) ---
+          float swirlAngle = uTime * 0.2 * aSpeed;
+          float cosA = cos(swirlAngle);
+          float sinA = sin(swirlAngle);
+          
+          vec3 rotatedPosition;
+          rotatedPosition.y = cosA * pos.y - sinA * pos.z;
+          rotatedPosition.z = sinA * pos.y + cosA * pos.z;
+          rotatedPosition.x = pos.x;
+          
+          // --- 2) Apply falling via modulo, now to rotatedPosition.y ---
+          rotatedPosition.y = mod((rotatedPosition.y - uTime * 0.1) + 40.0, 80.0) - 40.0;
+          
+          // Compute a fade factor based on the particle's original distance (for color blending)
+          vFade = 1.0 - clamp(length(pos) / 60.0, 0.0, 1.0);
+          
+          // Transform to view space
+          vec4 viewPos = modelViewMatrix * vec4(rotatedPosition, 1.0);
+          // Project to clip space then to normalized device coordinates (NDC)
+          vec4 clipPos = projectionMatrix * viewPos;
+          vec2 ndcPos = clipPos.xy / clipPos.w;
+          
+          // Screen-space mouse avoidance effect
+          vec2 deltaNDC = ndcPos - uMouseNDC;
+          float d = length(deltaNDC);
+          if(d < uThresholdNDC) {
+              float avoidanceFactor = 1.0 - (d / uThresholdNDC);
+              vec2 pushNDC = normalize(deltaNDC) * avoidanceFactor * uPushStrength;
+              // Convert the NDC displacement to a view-space offset:
+              vec2 pushView;
+              pushView.x = pushNDC.x * viewPos.z * uTanHalfFov * uAspect;
+              pushView.y = pushNDC.y * viewPos.z * uTanHalfFov;
+              viewPos.xy += pushView;
+          }
+          
+          gl_Position = projectionMatrix * viewPos;
+          gl_PointSize = 2.0;
       }
     `;
-
+    
     const fragmentShader = `
       uniform vec3 uColor1;
       uniform vec3 uColor2;
       varying float vFade;
       
       void main() {
-        vec3 color = mix(uColor2, uColor1, vFade);
-        gl_FragColor = vec4(color, 1.0);
+          vec3 color = mix(uColor2, uColor1, vFade);
+          gl_FragColor = vec4(color, 1.0);
       }
     `;
-
+    
     const material = new THREE.ShaderMaterial({
       uniforms: uniforms,
       vertexShader: vertexShader,
@@ -164,10 +153,10 @@
       transparent: true,
       depthWrite: false
     });
-
+    
     particleSystem = new THREE.Points(geometry, material);
     scene.add(particleSystem);
-
+    
     // =============================
     // 4) Update Uniforms on Resize
     // =============================
@@ -179,7 +168,7 @@
       uniforms.uAspect.value = window.innerWidth / window.innerHeight;
       uniforms.uTanHalfFov.value = Math.tan(camera.fov * 0.5 * Math.PI/180);
     }
-
+    
     // =============================
     // 5) Mouse Interaction in Screen-Space
     // =============================
@@ -187,17 +176,17 @@
       uniforms.uMouseNDC.value.x = (event.clientX / window.innerWidth) * 2 - 1;
       uniforms.uMouseNDC.value.y = -(event.clientY / window.innerHeight) * 2 + 1;
     });
-
+    
     // =============================
     // 6) Dynamic Color & Background Changes on Click
     // =============================
     let targetColor1 = uniforms.uColor1.value.clone();
     let targetColor2 = uniforms.uColor2.value.clone();
-
+    
     function generateRandomHexColor() {
       return '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
     }
-
+    
     function getRandomGradient() {
       const colorA = generateRandomHexColor();
       const colorB = generateRandomHexColor();
@@ -208,13 +197,13 @@
         return "linear-gradient(" + angle + "deg, " + colorA + ", " + colorB + ")";
       }
     }
-
+    
     document.addEventListener('click', function() {
       targetColor1 = new THREE.Color(generateRandomHexColor());
       targetColor2 = new THREE.Color(generateRandomHexColor());
       container.style.background = getRandomGradient();
     });
-
+    
     // =============================
     // 7) Animation Loop
     // =============================
@@ -223,16 +212,15 @@
       requestAnimationFrame(animate);
       const elapsed = clock.getElapsedTime();
       uniforms.uTime.value = elapsed;
-
       // Gradually tween shader colors toward the target colors
       uniforms.uColor1.value.lerp(targetColor1, 0.05);
       uniforms.uColor2.value.lerp(targetColor2, 0.05);
-
-      // Optional subtle camera drift:
+      
+      // Optional subtle camera drift
       camera.position.x = Math.sin(elapsed * 0.2) * 5;
       camera.position.y = Math.cos(elapsed * 0.1) * 3;
       camera.lookAt(scene.position);
-
+      
       renderer.render(scene, camera);
     }
     animate();

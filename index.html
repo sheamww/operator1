@@ -68,26 +68,17 @@
     geometry.setAttribute('aSpeed', new THREE.BufferAttribute(speeds, 1));
     
     // =============================
-    // 3) Shaders (Twirling, Cascading & Screen-Space Avoidance)
+    // 3) Shaders (Twirling & Cascading)
     // =============================
+    // Uniforms (removed collision avoidance-related uniforms)
     uniforms = {
-      uTime:         { value: 0 },
-      uColor1:       { value: new THREE.Color('#0ed2f7') },
-      uColor2:       { value: new THREE.Color('#ffffff') },
-      uMouseNDC:     { value: new THREE.Vector2(0, 0) },
-      uThresholdNDC: { value: 0.2 },
-      uPushStrength: { value: 1.0 },
-      uTanHalfFov:   { value: Math.tan(camera.fov * 0.5 * Math.PI/180) },
-      uAspect:       { value: window.innerWidth / window.innerHeight }
+      uTime:   { value: 0 },
+      uColor1: { value: new THREE.Color('#0ed2f7') },
+      uColor2: { value: new THREE.Color('#ffffff') }
     };
     
     const vertexShader = `
       uniform float uTime;
-      uniform vec2 uMouseNDC;
-      uniform float uThresholdNDC;
-      uniform float uPushStrength;
-      uniform float uTanHalfFov;
-      uniform float uAspect;
       attribute float aSpeed;
       varying float vFade;
       
@@ -104,31 +95,14 @@
           rotatedPosition.z = sinA * pos.y + cosA * pos.z;
           rotatedPosition.x = pos.x;
           
-          // --- 2) Apply falling via modulo, now to rotatedPosition.y ---
+          // --- 2) Apply falling effect via modulo on rotatedPosition.y ---
           rotatedPosition.y = mod((rotatedPosition.y - uTime * 0.1) + 40.0, 80.0) - 40.0;
           
-          // Compute a fade factor based on the particle's original distance (for color blending)
+          // Compute fade factor based on the particle's original distance (for color blending)
           vFade = 1.0 - clamp(length(pos) / 60.0, 0.0, 1.0);
           
           // Transform to view space
           vec4 viewPos = modelViewMatrix * vec4(rotatedPosition, 1.0);
-          // Project to clip space then to normalized device coordinates (NDC)
-          vec4 clipPos = projectionMatrix * viewPos;
-          vec2 ndcPos = clipPos.xy / clipPos.w;
-          
-          // Screen-space mouse avoidance effect
-          vec2 deltaNDC = ndcPos - uMouseNDC;
-          float d = length(deltaNDC);
-          if(d < uThresholdNDC) {
-              float avoidanceFactor = 1.0 - (d / uThresholdNDC);
-              vec2 pushNDC = normalize(deltaNDC) * avoidanceFactor * uPushStrength;
-              // Convert the NDC displacement to a view-space offset:
-              vec2 pushView;
-              pushView.x = pushNDC.x * viewPos.z * uTanHalfFov * uAspect;
-              pushView.y = pushNDC.y * viewPos.z * uTanHalfFov;
-              viewPos.xy += pushView;
-          }
-          
           gl_Position = projectionMatrix * viewPos;
           gl_PointSize = 2.0;
       }
@@ -165,20 +139,10 @@
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
-      uniforms.uAspect.value = window.innerWidth / window.innerHeight;
-      uniforms.uTanHalfFov.value = Math.tan(camera.fov * 0.5 * Math.PI/180);
     }
     
     // =============================
-    // 5) Mouse Interaction in Screen-Space
-    // =============================
-    window.addEventListener('pointermove', (event) => {
-      uniforms.uMouseNDC.value.x = (event.clientX / window.innerWidth) * 2 - 1;
-      uniforms.uMouseNDC.value.y = -(event.clientY / window.innerHeight) * 2 + 1;
-    });
-    
-    // =============================
-    // 6) Dynamic Color & Background Changes on Click
+    // 5) Dynamic Color & Background Changes on Click
     // =============================
     let targetColor1 = uniforms.uColor1.value.clone();
     let targetColor2 = uniforms.uColor2.value.clone();
@@ -205,7 +169,7 @@
     });
     
     // =============================
-    // 7) Animation Loop
+    // 6) Animation Loop
     // =============================
     clock = new THREE.Clock();
     function animate() {
@@ -215,12 +179,10 @@
       // Gradually tween shader colors toward the target colors
       uniforms.uColor1.value.lerp(targetColor1, 0.05);
       uniforms.uColor2.value.lerp(targetColor2, 0.05);
-      
-      // Optional subtle camera drift
+      // Optional subtle camera drift:
       camera.position.x = Math.sin(elapsed * 0.2) * 5;
       camera.position.y = Math.cos(elapsed * 0.1) * 3;
       camera.lookAt(scene.position);
-      
       renderer.render(scene, camera);
     }
     animate();

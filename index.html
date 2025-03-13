@@ -2,190 +2,288 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Pillar of Dots – Cascading, Twirling & Dynamic Colors</title>
+  <title>Rotational Fling & Gravity Example</title>
   <style>
     html, body {
-      margin: 0;
-      padding: 0;
+      margin: 0; 
+      padding: 0; 
+      overflow: hidden; 
       height: 100%;
-      overflow: hidden;
-      background: #000;
-      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-    }
-    /* Container for Three.js Canvas with a gradient background that transitions */
-    #scene-container {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 0;
-      background: radial-gradient(circle at center, #070b34, #000 80%);
-      transition: background 2s ease;
+      background-color: #000;
     }
   </style>
 </head>
 <body>
-  <!-- Three.js Scene Container -->
-  <div id="scene-container"></div>
-  <!-- Three.js (CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
-  <script>
-    // =============================
-    // 1) Scene & Camera Setup
-    // =============================
-    let scene, camera, renderer, clock, particleSystem, uniforms;
-    const container = document.getElementById('scene-container');
-    scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.z = 50;
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    container.appendChild(renderer.domElement);
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+<!-- OrbitControls from the Three.js examples -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+/*
+  -------------------------------------------------------------------------
+    1) Basic Setup: Scene, Camera, Renderer, Controls
+  -------------------------------------------------------------------------
+*/
+
+// Scene, Camera, Renderer
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(
+  60,                       // FOV
+  window.innerWidth / window.innerHeight, 
+  0.1, 
+  1000
+);
+camera.position.set(0, 0, 50);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// OrbitControls
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+// Let the user *right-click* to pan (default: right-drag or middle-click).
+// We can tweak controls here:
+controls.enablePan = true;      // allow panning
+controls.enableZoom = true;     // allow wheel-zoom
+controls.enableRotate = true;   // left-drag to orbit, right-drag to pan
+// For a better fling effect, we want "rotate speed" to be fairly high:
+controls.rotateSpeed = 0.8; 
+controls.panSpeed = 0.6;
+
+/*
+  -------------------------------------------------------------------------
+    2) Particle Data
+  -------------------------------------------------------------------------
+  We store positions & velocities in arrays. The geometry is updated
+  every frame from these arrays.
+*/
+
+// Number of particles (adjust carefully—O(N^2) calculations for gravity!)
+const N = 500;
+
+// Gravitational constant (tweak for stronger/weaker attraction).
+const G = 0.5;
+
+// Escape horizon: if a particle goes beyond this distance from origin,
+// it is no longer influenced by gravity (and won't come back).
+const ESCAPE_RADIUS = 100;
+
+// We'll track x,y,z in a single Float32Array of length 3*N:
+let positions = new Float32Array(3 * N);
+let velocities = new Float32Array(3 * N);
+
+// Initialize positions and velocities
+// Distribute them in some random sphere, with small random velocities.
+function initParticles() {
+  const radiusInit = 10;
+  for (let i = 0; i < N; i++) {
+    const ix = 3 * i;
+    const iy = ix + 1;
+    const iz = ix + 2;
     
-    // =============================
-    // 2) Particle Swirl & Cascading Geometry
-    // =============================
-    const particleCount = 20000;
-    const positions = new Float32Array(particleCount * 3);
-    const speeds = new Float32Array(particleCount);
-    // Define a vertical fall range (from -40 to +40)
-    const fallRange = 80;
-    const fallHalf = fallRange * 0.5;
-    for (let i = 0; i < particleCount; i++) {
-      const r = Math.random() * 5 + 10;          // radial distance between 10 and 15
-      const angle = Math.random() * Math.PI * 4;   // swirl angle
-      // y position is randomly within the vertical range
-      const y = (Math.random() - 0.5) * fallRange;
-      positions[i * 3]     = r * Math.cos(angle);
-      positions[i * 3 + 1] = y;
-      positions[i * 3 + 2] = r * Math.sin(angle);
-      // Use individual speed only for the swirl (rotation)
-      speeds[i] = (Math.random() * 0.5) + 0.5;
+    // Random point inside a sphere of radiusInit
+    // (simple approach: use random direction, random radius)
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos((Math.random() * 2) - 1);
+    const r = Math.random() * radiusInit;
+
+    const sinPhi = Math.sin(phi);
+    positions[ix] = r * sinPhi * Math.cos(theta);
+    positions[iy] = r * sinPhi * Math.sin(theta);
+    positions[iz] = r * Math.cos(phi);
+
+    // Small random initial velocity
+    velocities[ix] = (Math.random() - 0.5) * 0.5;
+    velocities[iy] = (Math.random() - 0.5) * 0.5;
+    velocities[iz] = (Math.random() - 0.5) * 0.5;
+  }
+}
+initParticles();
+
+// Create a BufferGeometry to display points
+const geometry = new THREE.BufferGeometry();
+geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+// Points Material
+const material = new THREE.PointsMaterial({
+  color: 0xffffff,
+  size: 2,
+  sizeAttenuation: true
+});
+
+// The particle system
+const particleSystem = new THREE.Points(geometry, material);
+scene.add(particleSystem);
+
+/*
+  -------------------------------------------------------------------------
+    3) Camera Rotation -> "Fling" Force
+  -------------------------------------------------------------------------
+  We'll track how fast the camera is rotating in azimuth (horizontal orbit).
+  Then we apply a small outward impulse to each particle.
+*/
+
+// We'll store the previous azimuthal angle each frame:
+let prevAzimuthalAngle = controls.getAzimuthalAngle();
+
+// Factor to scale how strongly camera rotation flings the particles:
+const flingFactor = 2.0; // tweak as desired
+
+/*
+  -------------------------------------------------------------------------
+    4) Gravity Simulation
+  -------------------------------------------------------------------------
+  We'll do a naive O(N^2) approach: for each pair, compute the gravitational
+  force. If either particle is beyond ESCAPE_RADIUS, skip it.
+
+  Then we integrate positions with a simple Euler method.
+*/
+
+// Time step for the physics updates
+const dt = 0.02;
+
+function updatePhysics() {
+  // 4.1) Calculate camera rotation velocity:
+  const currentAzimuthalAngle = controls.getAzimuthalAngle();
+  const deltaAngle = currentAzimuthalAngle - prevAzimuthalAngle;
+  prevAzimuthalAngle = currentAzimuthalAngle;
+
+  // We'll interpret the absolute size of deltaAngle as a camera rotation speed.
+  // Then fling outward from the Y-axis. This is a hacky approach for a "fun" effect.
+  const flingSpeed = deltaAngle * flingFactor;
+
+  // 4.2) We'll store the net acceleration for each particle in a temp array:
+  let accel = new Float32Array(3 * N);
+
+  // 4.3) Compute pairwise gravitational forces
+  for (let i = 0; i < N; i++) {
+    // If particle i is beyond ESCAPE_RADIUS, skip
+    const ix = 3 * i;
+    const iy = ix + 1;
+    const iz = ix + 2;
+
+    const px = positions[ix];
+    const py = positions[iy];
+    const pz = positions[iz];
+    const r2 = px*px + py*py + pz*pz;
+    if (r2 > ESCAPE_RADIUS * ESCAPE_RADIUS) {
+      continue; // skip gravity if out of horizon
     }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('aSpeed', new THREE.BufferAttribute(speeds, 1));
-    
-    // =============================
-    // 3) Shaders (Twirling & Cascading)
-    // =============================
-    // Uniforms (removed collision avoidance-related uniforms)
-    uniforms = {
-      uTime:   { value: 0 },
-      uColor1: { value: new THREE.Color('#0ed2f7') },
-      uColor2: { value: new THREE.Color('#ffffff') }
-    };
-    
-    const vertexShader = `
-      uniform float uTime;
-      attribute float aSpeed;
-      varying float vFade;
-      
-      void main() {
-          vec3 pos = position;
-          
-          // --- 1) Rotate around X-axis (swirl in Y–Z plane) ---
-          float swirlAngle = uTime * 0.2 * aSpeed;
-          float cosA = cos(swirlAngle);
-          float sinA = sin(swirlAngle);
-          
-          vec3 rotatedPosition;
-          rotatedPosition.y = cosA * pos.y - sinA * pos.z;
-          rotatedPosition.z = sinA * pos.y + cosA * pos.z;
-          rotatedPosition.x = pos.x;
-          
-          // --- 2) Apply falling effect via modulo on rotatedPosition.y ---
-          rotatedPosition.y = mod((rotatedPosition.y - uTime * 0.1) + 40.0, 80.0) - 40.0;
-          
-          // Compute fade factor based on the particle's original distance (for color blending)
-          vFade = 1.0 - clamp(length(pos) / 60.0, 0.0, 1.0);
-          
-          // Transform to view space
-          vec4 viewPos = modelViewMatrix * vec4(rotatedPosition, 1.0);
-          gl_Position = projectionMatrix * viewPos;
-          gl_PointSize = 2.0;
+
+    // For fling effect, we do a quick hack:
+    // We'll push the particle radially outward in the XZ plane if there's a deltaAngle.
+    // The bigger the deltaAngle, the bigger the outward push.
+    if (Math.abs(deltaAngle) > 0.0001) {
+      // Vector from Y-axis direction. We'll just treat (px, pz) radially outward:
+      const distXZ = Math.sqrt(px*px + pz*pz);
+      if (distXZ > 0.0001) {
+        // Normal in XZ plane
+        const nx = px / distXZ;
+        const nz = pz / distXZ;
+        // Add to the acceleration
+        accel[ix] += nx * flingSpeed; 
+        accel[iz] += nz * flingSpeed; 
       }
-    `;
-    
-    const fragmentShader = `
-      uniform vec3 uColor1;
-      uniform vec3 uColor2;
-      varying float vFade;
-      
-      void main() {
-          vec3 color = mix(uColor2, uColor1, vFade);
-          gl_FragColor = vec4(color, 1.0);
+    }
+
+    // Pairwise gravity with all j > i to avoid double counting
+    for (let j = i+1; j < N; j++) {
+      const jx = 3 * j;
+      const jy = jx + 1;
+      const jz = jx + 2;
+
+      const qx = positions[jx];
+      const qy = positions[jy];
+      const qz = positions[jz];
+      const rq2 = qx*qx + qy*qy + qz*qz;
+
+      // If j out of horizon, skip
+      if (rq2 > ESCAPE_RADIUS * ESCAPE_RADIUS) {
+        continue;
       }
-    `;
-    
-    const material = new THREE.ShaderMaterial({
-      uniforms: uniforms,
-      vertexShader: vertexShader,
-      fragmentShader: fragmentShader,
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      depthWrite: false
-    });
-    
-    particleSystem = new THREE.Points(geometry, material);
-    scene.add(particleSystem);
-    
-    // =============================
-    // 4) Update Uniforms on Resize
-    // =============================
-    window.addEventListener('resize', onWindowResize, false);
-    function onWindowResize() {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+
+      // Vector i->j
+      const dx = qx - px;
+      const dy = qy - py;
+      const dz = qz - pz;
+      let distSq = dx*dx + dy*dy + dz*dz;
+      if (distSq < 0.000001) distSq = 0.000001; // avoid dividing by zero
+      const dist = Math.sqrt(distSq);
+
+      // Gravitational force magnitude (assuming masses = 1 for simplicity)
+      // F = G / r^2
+      const force = G / distSq;
+
+      // Normalized direction
+      const nx = dx / dist;
+      const ny = dy / dist;
+      const nz = dz / dist;
+
+      // Acceleration on i (towards j)
+      accel[ix] += force * nx;
+      accel[iy] += force * ny;
+      accel[iz] += force * nz;
+
+      // Acceleration on j (towards i) is the opposite
+      accel[jx] -= force * nx;
+      accel[jy] -= force * ny;
+      accel[jz] -= force * nz;
     }
-    
-    // =============================
-    // 5) Dynamic Color & Background Changes on Click
-    // =============================
-    let targetColor1 = uniforms.uColor1.value.clone();
-    let targetColor2 = uniforms.uColor2.value.clone();
-    
-    function generateRandomHexColor() {
-      return '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
-    }
-    
-    function getRandomGradient() {
-      const colorA = generateRandomHexColor();
-      const colorB = generateRandomHexColor();
-      if (Math.random() < 0.5) {
-        return "radial-gradient(circle at center, " + colorA + ", " + colorB + ")";
-      } else {
-        const angle = Math.floor(Math.random() * 360);
-        return "linear-gradient(" + angle + "deg, " + colorA + ", " + colorB + ")";
-      }
-    }
-    
-    document.addEventListener('click', function() {
-      targetColor1 = new THREE.Color(generateRandomHexColor());
-      targetColor2 = new THREE.Color(generateRandomHexColor());
-      container.style.background = getRandomGradient();
-    });
-    
-    // =============================
-    // 6) Animation Loop
-    // =============================
-    clock = new THREE.Clock();
-    function animate() {
-      requestAnimationFrame(animate);
-      const elapsed = clock.getElapsedTime();
-      uniforms.uTime.value = elapsed;
-      // Gradually tween shader colors toward the target colors
-      uniforms.uColor1.value.lerp(targetColor1, 0.05);
-      uniforms.uColor2.value.lerp(targetColor2, 0.05);
-      // Optional subtle camera drift:
-      camera.position.x = Math.sin(elapsed * 0.2) * 5;
-      camera.position.y = Math.cos(elapsed * 0.1) * 3;
-      camera.lookAt(scene.position);
-      renderer.render(scene, camera);
-    }
-    animate();
-  </script>
+  }
+
+  // 4.4) Integrate velocity & position (Euler)
+  for (let i = 0; i < N; i++) {
+    const ix = 3 * i;
+    const iy = ix + 1;
+    const iz = ix + 2;
+
+    // Velocity update: v += a * dt
+    velocities[ix] += accel[ix] * dt;
+    velocities[iy] += accel[iy] * dt;
+    velocities[iz] += accel[iz] * dt;
+
+    // Position update: x += v * dt
+    positions[ix] += velocities[ix] * dt;
+    positions[iy] += velocities[iy] * dt;
+    positions[iz] += velocities[iz] * dt;
+  }
+
+  // Mark position attribute for update so Three.js can render new positions
+  geometry.attributes.position.needsUpdate = true;
+}
+
+/*
+  -------------------------------------------------------------------------
+    5) Main Animation Loop
+  -------------------------------------------------------------------------
+*/
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  // Update physics
+  updatePhysics();
+
+  // Update orbit controls
+  controls.update();
+
+  // Render
+  renderer.render(scene, camera);
+}
+animate();
+
+/*
+  -------------------------------------------------------------------------
+    6) Handle Window Resize
+  -------------------------------------------------------------------------
+*/
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
 </body>
 </html>
